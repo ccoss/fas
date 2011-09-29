@@ -1,0 +1,3 @@
+include fas_asterisk/__init__.py
+include fas_asterisk/templates/*.html
+include fas_asterisk/templates/*.py
