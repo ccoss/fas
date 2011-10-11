@@ -164,6 +164,11 @@ def random_string(charset, length):
 
     return s
 
+def generate_token():
+    token_charset = string.ascii_letters + string.digits
+    return random_string(token_charset, 32)
+
+
 class User(controllers.Controller):
     ''' Our base User controller for user based operations '''
     def __init__(self):
@@ -251,6 +256,60 @@ class User(controllers.Controller):
 
         target = target.filter_private()
         return dict(target=target, languages=languages, admin=admin, show=show)
+
+    def uploadgitsshkey(self, username, add=None, ssh_key=None):
+        import shutil 
+        # TODO: Is this right?  
+        if not ssh_key:
+            return
+        gitadmin_private_key = config.get('gitadmin_private_key','')
+        gitserver = config.get('gitserver','')
+        gitadmin_dir = config.get('gitadmin_dir','')
+        gitadmin_repo = config.get('gitadmin_repo','')
+        git_ssh_key_dir = config.get('git_ssh_key_dir','')
+        # 1.cd gitadmin_dir
+        os.chdir(gitadmin_dir)
+        # 2.gen sshwrap.sh:
+        fobj = open( 'sshwrap.sh','w' )
+        fobj.write( '#!/bin/bash%s' % os.linesep )
+        fobj.write( 'gitadmin_key=%s%s' % ( gitadmin_private_key, os.linesep ) )
+        fobj.write( 'ssh -i $gitadmin_key $@%s' % os.linesep )
+        fobj.close()
+        os.chmod('sshwrap.sh',0700)
+        sshpath=os.path.abspath('sshwrap.sh')
+        # #!/bin/bash
+        # gitadmin_key=gitadmin_private_key
+        # ssh -i $gitadmin_key $@
+        # EOF
+        # 3.GIT_SSH=sshwrap.sh git clone git@gitserver:gitadmin_repo
+        shutil.rmtree(gitadmin_repo,True)
+        cmd = ( 'GIT_SSH=%s git clone git@%s:%s'%(sshpath,gitserver, gitadmin_repo), )
+        subprocess.call( cmd, shell=True )
+        # 4.compare gitadmin_repo/git_ssh_key_dir/username[@add].pub with ssh_key
+        #   if not eq  cover gitadmin_repo/git_ssh_key_dir/username@add.pub with ssh_key
+        keyadd = '@%s'%add if add else ''
+        keyfile = os.path.abspath('%s/%s/%s%s.pub' % ( gitadmin_repo, git_ssh_key_dir, username, keyadd ))
+        c=''
+        if os.path.exists(keyfile):
+            keyobj = open( keyfile, 'r' )
+            c = keyobj.read()
+            keyobj.close()
+        if c != ssh_key:
+            keyobj = open( keyfile, 'w' )
+            keyobj.write( ssh_key )
+            keyobj.close()
+            os.chdir(gitadmin_repo)
+            # 5. git add , commit, push
+            cmd = ('git', 'add', '%s/%s%s.pub' % ( git_ssh_key_dir, username, keyadd ))
+            subprocess.call( cmd  )
+            cmd = ('git', 'commit', '-m','\"update %s/%s%s.pub\"' % ( git_ssh_key_dir, username, keyadd ))
+            subprocess.call( cmd )
+            cmd = ('GIT_SSH=%s git push '%sshpath, )
+            subprocess.call( cmd, shell=True )
+        keyobj.close()
+        os.chdir(gitadmin_dir)
+        #shutil.rmtree(gitadmin_repo)
+         
 
     @identity.require(identity.not_anonymous())
     @validate(validators={
@@ -350,8 +409,9 @@ class User(controllers.Controller):
                 emailflash = _('Before your new email takes effect, you ' + \
                     'must confirm it.  You should receive an email with ' + \
                     'instructions shortly.')
+
                 token_charset = string.ascii_letters + string.digits
-                token = rand_string(token_charset, 32)
+                token = random_string(token_charset, 32)
                 target.unverified_email = email
                 target.emailtoken = token
                 change_subject = _('Email Change Requested for %s') % \
@@ -386,6 +446,7 @@ login with your Fedora account first):
             turbogears.redirect("/user/edit/%s" % target.username)
             return dict()
         else:
+            self.uploadgitsshkey( target.username, None, target.ssh_key )
             change_subject = _('Fedora Account Data Update %s') % \
                 target.username
             change_text = _('''

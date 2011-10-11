@@ -164,6 +164,12 @@ openssl_l = "Raleigh"
 openssl_o = "Fedora Project"
 openssl_ou = "Fedora User Cert"
 
+gitadmin_private_key = "/root/git/fas/git/gitadmin"
+gitserver = "172.16.24.1"
+gitadmin_dir = "/root/git/fas/git"
+gitadmin_repo= "gitolite-admin"
+git_ssh_key_dir = "keydir"
+
 # Note: gpg is for encrypting password reset mail if the user has
 # a gpg key registered.  It's currently broken
 gpgexec = "/usr/bin/gpg"
