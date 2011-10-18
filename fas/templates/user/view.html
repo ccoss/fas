@@ -59,11 +59,13 @@
         <!-- We should correct this.  Everything else is filtered in the
         - model:People*Select classes.
         - -->
+        <!--
         <py:if test="personal or admin">
           <dt>${_('Public SSH Key:')}</dt>
-          <dd py:if="person.ssh_key" title="${person.ssh_key}">${person.ssh_key[:20]}....&nbsp;</dd>
-          <dd py:if="not person.ssh_key">No ssh key provided&nbsp;</dd>
+          <dd py:if="sshkey.ssh_key" title="${sshkey.ssh_key}">${sshkey.ssh_key[:20]}....&nbsp;</dd>
+          <dd py:if="not sshkey.ssh_key">No ssh key provided&nbsp;</dd>
         </py:if>
+        -->
         <py:if test="person.comments">
           <dt>${_('Comments:')}</dt><dd>${person.comments}&nbsp;</dd>
         </py:if>
@@ -114,6 +116,53 @@
         </dd>
       </dl>
     </div>
+    <h3 py:if="personal">${_('Your Public SSH Keys')}</h3>
+    <h3 py:if="not personal">${_('%s\'s Public SSH keys') % person.username}</h3>
+    <ul id="rolespanel">
+      <py:for each="sshkey in sshkeys">
+      <li class="role">
+      <dt py:if="sshkey.ssh_key" title="${sshkey.ssh_key}">${sshkey.title}</dt>
+      <dt id="edit_key_action${sshkey.id}" onclick='showhidediv("edit_key_action${sshkey.id}","edit_key_form_wrap${sshkey.id}");'><a href="#">(edit)</a></dt>
+      <dd><a href="${tg.url('/user/delsshkey/%s' % sshkey.id)}">(delete)</a></dd>
+      <div id="edit_key_form_wrap${sshkey.id}" style="display:none">
+        <form action="${tg.url('/user/editsshkey/%s' % sshkey.id)}" class="key_editing" id="edit_key${sshkey.id}" method="post">                
+        <dl class="form">
+          <dt><label>Title</label></dt>
+          <dd><input id="edit_public_key_title${sshkey.id}" name="title" size="30" type="text" value="${sshkey.title}" /></dd>
+        </dl>
+        <dl class="form">
+          <dt><label>Key</label></dt>
+          <dd><textarea class="key_value" cols="60" id="edit_public_key_key${sshkey.id}" name="ssh_key" rows="10">${sshkey.ssh_key}</textarea></dd>
+        </dl>
+        <div class="form-actions">
+          <button type="submit" class="minibutton"><span>Save key</span></button>
+            or <a href="#" id="cancel_edit_key${sshkey.id}" class="action" onclick='showhidediv("edit_key_action${sshkey.id}","edit_key_form_wrap${sshkey.id}");'>cancel</a>
+        </div>
+        </form>
+      </div>
+      </li>
+      </py:for>
+      <h3 id="add_key_action" onclick='showhidediv("add_key_action","new_key_form_wrap");'><a href="#">Add another public key</a></h3>
+
+      <div id="new_key_form_wrap" class="add-pill-form add-keys-form" style="display:none">
+      <form action="${tg.url('/user/addsshkey/%s' % person.username)}" class="key_editing" id="new_key" method="post">                
+        <dl class="form">
+          <dt><label>Title</label></dt>
+          <dd><input id="public_key_title" name="title" size="30" type="text" /></dd>
+        </dl>
+        <dl class="form">
+          <dt><label>Key</label></dt>
+          <dd><textarea class="key_value" cols="60" id="public_key_key" name="ssh_key" rows="10"></textarea></dd>
+        </dl>
+
+        <div class="form-actions">
+          <button type="submit" class="minibutton"><span>Add key</span></button>
+            or <a href="#" id="cancel_add_key" class="action" onclick='showhidediv("add_key_action","new_key_form_wrap");'>cancel</a>
+        </div>
+      </form>
+      </div>
+
+    </ul>
     <h3 py:if="personal">${_('Your Roles')}</h3>
     <h3 py:if="not personal">${_('%s\'s Roles') % person.username}</h3>
     <!--mpm    <ul class="roleslist">

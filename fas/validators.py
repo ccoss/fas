@@ -175,7 +175,8 @@ class ValidSSHKey(validators.FancyValidator):
 
     def _to_python(self, value, state):
         # pylint: disable-msg=C0111,W0613
-        return value.file.read().decode('utf-8')
+        #return value.file.read().decode('utf-8')
+        return value
 
     def validate_python(self, value, state):
         # pylint: disable-msg=C0111

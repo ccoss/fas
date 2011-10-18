@@ -21,10 +21,10 @@
 --\c fas2
 \c koji
 
-DROP SCHEMA fas CASCADE;
+DROP SCHEMA fedora CASCADE;
 
 
-CREATE SCHEMA fas AUTHORIZATION fas;
+CREATE SCHEMA fedora AUTHORIZATION fedora;
 
 create procedural language plpythonu
   handler plpythonu_call_handler
@@ -48,7 +48,7 @@ CREATE TABLE people (
     -- uppercasing
     -- gpg_fingerprint varchar(40),
     gpg_keyid VARCHAR(64),
-    ssh_key TEXT,
+    -- ssh_key TEXT,
     -- tg_user::password
     password VARCHAR(127) NOT NULL,
     old_password VARCHAR(127),
@@ -84,6 +84,13 @@ CREATE TABLE people (
 
 create index people_status_idx on people(status);
 cluster people_status_idx on people;
+
+CREATE TABLE people_sshkey (
+    id SERIAL NOT NULL PRIMARY KEY,
+    person_id integer references people(id) not null,
+    title TEXT not null,
+    ssh_key Text
+);
 
 CREATE TABLE configs (
     id SERIAL PRIMARY KEY,
@@ -429,7 +436,7 @@ GRANT ALL ON TABLE people, groups, person_roles, bugzilla_queue, configs, config
 
 -- Create default admin user - Default Password "admin"
 INSERT INTO people (id, username, human_name, password, email) VALUES (100001, 'admin', 'Admin User', '$1$djFfnacd$b6NFqFlac743Lb4sKWXj4/', 'root@localhost');
-INSERT INTO people (id, username, human_name, password, email) VALUES (100002, 'kojiadmin', 'Koji Admin User', '$1$djFfnacd$b6NFqFlac743Lb4sKWXj4/', 'kojiadmin@localhost');
+INSERT INTO people (id, username, human_name, password, email) VALUES (100002, 'kojiadmin', 'Koji Admin User', '$1$djFfnacd$b6NFqFlac743Lb4sKWXj4/', 'chensuchun@gmail.com');
 
 -- Create default groups and populate
 INSERT INTO groups (id, name, display_name, owner_id, group_type, user_can_remove) VALUES (100001, 'cla_fpca', 'CLA Fpca Group', (SELECT id from people where username='admin'), 'cla', false);
