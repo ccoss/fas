@@ -264,8 +264,7 @@ class User(controllers.Controller):
             return dict()
 
         target = target.filter_private()
-        sshkey = PeopleSSHKey.by_person_title( target.id )
-        return dict(target=target, sshkey=sshkey, languages=languages, admin=admin, show=show)
+        return dict(target=target, languages=languages, admin=admin, show=show)
 
          
 
@@ -322,7 +321,6 @@ class User(controllers.Controller):
         username = identity.current.user_name
         person = People.by_username(username)
         target = People.by_username(targetname)
-        sshkey = PeopleSSHKey.by_person_title( person.id )
         emailflash = ''
 
         if not can_edit_user(person, target):

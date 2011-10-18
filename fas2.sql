@@ -21,10 +21,10 @@
 --\c fas2
 \c koji
 
-DROP SCHEMA fedora CASCADE;
+DROP SCHEMA fas CASCADE;
 
 
-CREATE SCHEMA fedora AUTHORIZATION fedora;
+CREATE SCHEMA fas AUTHORIZATION fas;
 
 create procedural language plpythonu
   handler plpythonu_call_handler
