@@ -17,12 +17,20 @@
 --            Ricky Zhou <ricky@fedoraproject.org>
 --            Mike McGrath <mmcgrath@redhat.com>
 --
-create database fas2 encoding = 'UTF8';
-\c fas2
+--create database fas2 encoding = 'UTF8';
+--\c fas2
+\c koji
+
+DROP SCHEMA fas CASCADE;
+
+
+CREATE SCHEMA fas AUTHORIZATION fas;
 
 create procedural language plpythonu
   handler plpythonu_call_handler
   validator plpythonu_validator;
+
+BEGIN WORK;
 
 CREATE SEQUENCE person_seq;
 -- TODO: Set this to start where our last person_id is
@@ -40,7 +48,7 @@ CREATE TABLE people (
     -- uppercasing
     -- gpg_fingerprint varchar(40),
     gpg_keyid VARCHAR(64),
-    ssh_key TEXT,
+    -- ssh_key TEXT,
     -- tg_user::password
     password VARCHAR(127) NOT NULL,
     old_password VARCHAR(127),
@@ -76,6 +84,13 @@ CREATE TABLE people (
 
 create index people_status_idx on people(status);
 cluster people_status_idx on people;
+
+CREATE TABLE people_sshkey (
+    id SERIAL NOT NULL PRIMARY KEY,
+    person_id integer references people(id) not null,
+    title TEXT not null,
+    ssh_key Text
+);
 
 CREATE TABLE configs (
     id SERIAL PRIMARY KEY,
@@ -118,7 +133,7 @@ CREATE TABLE groups (
     -- tg_group::created
     creation TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     check (group_type in ('cla', 'system', 'bugzilla','cvs', 'bzr', 'git', 'hg', 'mtn',
-        'svn', 'shell', 'torrent', 'tracker', 'tracking', 'user')) 
+        'svn', 'shell', 'torrent', 'tracker', 'tracking', 'user','koji')) 
 );
 
 create index groups_group_type_idx on groups(group_type);
@@ -337,11 +352,91 @@ $bz_sync_e$ language plpythonu;
 create trigger email_bugzilla_sync before update on people
   for each row execute procedure bugzilla_sync_email();
 
+create or replace function koji_sync_user() returns trigger AS $koji_sync_user$
+    if TD['event'] == 'INSERT':
+        # insert
+        row = TD['new']
+        plan = plpy.prepare( "select id from koji.users where name = $1", ('varchar',))
+        result = plpy.execute( plan, (row['username'],), 1)
+        if not result:
+            plan = plpy.prepare( "insert into koji.users"
+                " (name, password, status, usertype)"
+                " values ($1, $2, $3, $4)", ('varchar','varchar','int4','int4'))
+            plpy.execute( plan, (row['username'],row['password'],0,1))
+        else:
+            plpy.info( "%s already in koji users" % row['username'] )
+    else:
+        if TD['old']['password'] != TD['new']['password']:
+            row = TD['new']
+            plan = plpy.prepare( "update koji.users set password = $1 where name = $2",
+                ('varchar','varchar') )
+            plpy.execute( plan, (row['password'],row['username']))
+
+    return None
+
+$koji_sync_user$ language plpythonu;
+
+create trigger user_koji_sync after insert or update on people
+  for each row execute procedure koji_sync_user();
+
+
+create or replace function koji_group_sync() returns trigger as $kg_sync$
+    if TD['event'] == 'DELETE':
+        # 'r' for removing an entry from koji
+        newaction = 'r'
+        row = TD['old']
+    else:
+        # insert or update
+        row = TD['new']
+        if row['role_status'] == 'approved':
+            # approved so add an entry to koji
+            newaction = 'a'
+        else:
+            # no longer approved so remove the entry from bugzilla
+            newaction = 'r'
+
+    try:
+        plan = plpy.prepare("select name,group_type from groups where id = $1",('int4',))
+        result = plpy.execute( plan, (row['group_id'],) )
+        groupname = result[0]['name']
+        if result[0]['group_type'] != 'koji':
+            return None
+        plan = plpy.prepare("select id from koji.permissions where name = $1",('varchar',))
+        kojipermid = plpy.execute( plan, ( groupname, ) )[0]['id']
+        plan = plpy.prepare("select username from people where id = $1",('int4',))
+        username = plpy.execute( plan, (row['person_id'],))[0]['username']
+        plan = plpy.prepare("select id from koji.users where name = $1",('varchar',))
+        kojiuserid = plpy.execute( plan,( username,))[0]['id']
+        plan = plpy.prepare("select perm_id from koji.user_perms where user_id = $1",('int4',))
+        result = plpy.execute( plan,( kojiuserid,))
+        permids = [a['perm_id'] for a in result ]
+        if kojipermid in permids:
+            if newaction == 'r':
+                plan = plpy.prepare("delete from koji.user_perms where user_id = $1 and perm_id = $2",('int4','int4'))
+                plpy.execute( plan, ( kojiuserid, kojipermid ) )
+        else:
+            if newaction == 'a':
+                kojiadminid = plpy.execute("select id from koji.users where name = 'kojiadmin'")[0]['id']
+                plan = plpy.prepare("insert into koji.user_perms ( user_id, perm_id, creator_id ) values ( $1, $2, $3 )",('int4','int4','int4'))
+                plpy.execute( plan, ( kojiuserid, kojipermid, kojiadminid ) )
+    except Exception, e:
+        return None
+    finally:
+        return None
+
+$kg_sync$ language plpythonu;
+
+create trigger role_koji_sync before update or insert or delete
+  on person_roles
+  for each row execute procedure koji_group_sync();
+
+
 -- For Fas to connect to the database
 GRANT ALL ON TABLE people, groups, person_roles, bugzilla_queue, configs, configs_id_seq, person_seq, visit, visit_identity, log, log_id_seq, session TO GROUP fedora;
 
 -- Create default admin user - Default Password "admin"
 INSERT INTO people (id, username, human_name, password, email) VALUES (100001, 'admin', 'Admin User', '$1$djFfnacd$b6NFqFlac743Lb4sKWXj4/', 'root@localhost');
+INSERT INTO people (id, username, human_name, password, email) VALUES (100002, 'kojiadmin', 'Koji Admin User', '$1$djFfnacd$b6NFqFlac743Lb4sKWXj4/', 'chensuchun@gmail.com');
 
 -- Create default groups and populate
 INSERT INTO groups (id, name, display_name, owner_id, group_type, user_can_remove) VALUES (100001, 'cla_fpca', 'CLA Fpca Group', (SELECT id from people where username='admin'), 'cla', false);
@@ -351,5 +446,18 @@ INSERT INTO groups (id, name, display_name, owner_id, group_type) VALUES (100006
 INSERT INTO groups (id, name, display_name, owner_id, group_type) VALUES (100148, 'fedorabugs', 'Fedora Bugs Group', (SELECT id from people where username='admin'), 'tracking');
 INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('fas-system', 'System users allowed to get password and key information', (SELECT id from people where username='admin'), 'system');
 
+-- Create the default group for koji
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('admin', 'Koji admin group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('build', 'Koji build group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('repo', 'Koji create repo group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('livecd', 'Koji create livecd group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('maven-import', 'Koji maven-import group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('win-import', 'Koji win-import group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('win-admin', 'Koji win-admin group', (SELECT id from people where username='kojiadmin'), 'koji');
+INSERT INTO groups (name, display_name, owner_id, group_type) VALUES ('appliance', 'appliance', (SELECT id from people where username='kojiadmin'), 'koji');
+
 
 INSERT INTO person_roles (person_id, group_id, role_type, role_status, internal_comments, sponsor_id) VALUES ((SELECT id from people where username='admin'), (select id from groups where name='accounts'), 'administrator', 'approved', 'created at install time', (SELECT id from people where username='admin'));
+INSERT INTO person_roles (person_id, group_id, role_type, role_status, internal_comments, sponsor_id) VALUES ((SELECT id from people where username='kojiadmin'), (select id from groups where name='admin'), 'administrator', 'approved', 'created at install time', (SELECT id from people where username='kojiadmin'));
+
+COMMIT WORK;

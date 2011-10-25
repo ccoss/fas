@@ -64,8 +64,8 @@ from sqlalchemy.sql import select, and_
 from fedora.tg.tg1utils import request_format
 
 import fas
-from fas.model import PeopleTable, PersonRolesTable, GroupsTable
-from fas.model import People, PersonRoles, Groups, Log
+from fas.model import PeopleTable, PeopleSSHKeyTable,  PersonRolesTable, GroupsTable
+from fas.model import People, PeopleSSHKey, PersonRoles, Groups, Log
 from fas import openssl_fas
 from fas.auth import is_admin, cla_done, undeprecated_cla_done, can_edit_user
 from fas.util import available_languages
@@ -162,6 +162,11 @@ def random_string(charset, length):
 
     return s
 
+def generate_token():
+    token_charset = string.ascii_letters + string.digits
+    return random_string(token_charset, 32)
+
+
 class User(controllers.Controller):
     ''' Our base User controller for user based operations '''
     # Regex to tell if something looks like a crypted password
@@ -205,6 +210,15 @@ class User(controllers.Controller):
         if not username:
             username = identity.current.user_name
         person = People.by_username(username)
+       # sshkey_test = select([PeopleSSHKeyTable.c.id],
+       #               PeopleSSHKeyTable.c.person_id==person.id)\
+       #             .execute().fetchall()
+       # if not sshkey_test:
+       #     sshkey = PeopleSSHKey()
+       #     sshkey.person_id = person.id
+       #     sshkey.title = 'default'
+       #     session.flush()
+        sshkeys = PeopleSSHKey.by_personid( person.id )
         if identity.current.user_name == username:
             personal = True
         else:
@@ -221,7 +235,7 @@ class User(controllers.Controller):
                 'PersonRole': ('group',),
                 'Groups': ('unapproved_roles',),
                 }
-        return dict(person=person_data, cla=cla, undeprecated=undeprecated_cla, personal=personal,
+        return dict(person=person_data, sshkeys=sshkeys, cla=cla, undeprecated=undeprecated_cla, personal=personal,
                 admin=admin, show=show)
 
     @identity.require(identity.not_anonymous())
@@ -252,6 +266,8 @@ class User(controllers.Controller):
 
         target = target.filter_private()
         return dict(target=target, languages=languages, admin=admin, show=show)
+
+         
 
     @identity.require(identity.not_anonymous())
     @validate(validators={
@@ -351,6 +367,7 @@ class User(controllers.Controller):
                 emailflash = _('Before your new email takes effect, you ' + \
                     'must confirm it.  You should receive an email with ' + \
                     'instructions shortly.')
+
                 token_charset = string.ascii_letters + string.digits
                 token = random_string(token_charset, 32)
                 target.unverified_email = email
@@ -369,8 +386,9 @@ login with your Fedora account first):
             target.ircnick = ircnick
             target.gpg_keyid = gpg_keyid
             target.telephone = telephone
-            if ssh_key:
-                target.ssh_key = ssh_key
+            #if ssh_key:
+            #    sshkey.ssh_key = ssh_key
+                #target.ssh_key = ssh_key
             target.postal_address = postal_address
             target.comments = comments
             target.locale = locale
@@ -387,6 +405,7 @@ login with your Fedora account first):
             turbogears.redirect("/user/edit/%s" % target.username)
             return dict()
         else:
+            #self.uploadgitsshkey( target.username, sshkey.title, sshkey.ssh_key )
             change_subject = _('Fedora Account Data Update %s') % \
                 target.username
             change_text = _('''
@@ -404,7 +423,6 @@ updated information is:
   latitude:       %(latitude)s
   longitude:      %(longitude)s
   privacy flag:   %(privacy)s
-  ssh_key:        %(ssh_key)s
   gpg_keyid:      %(gpg_keyid)s
 
 If the above information is incorrect, please log in and fix it:
@@ -420,7 +438,6 @@ If the above information is incorrect, please log in and fix it:
          'latitude'       : target.latitude,
          'longitude'      : target.longitude,
          'privacy'        : target.privacy,
-         'ssh_key'        : target.ssh_key,
          'gpg_keyid'      : target.gpg_keyid,
          'editurl'        : config.get('base_url_filter.base_url').rstrip('/')}
             send_mail(target.email, change_subject, change_text)
@@ -1339,4 +1356,234 @@ automatically revoked, and should stop working within the hour.
         print "LAST_SEEN: %s" % last_seen
         person.last_seen = last_seen
         session.flush()
+        return dict()
+
+    def addgitsshkey(self, username, title, ssh_key ):
+        import shutil 
+        # TODO: Is this right?  
+        if not ssh_key or not title:
+            return
+        gitadmin_private_key = config.get('gitadmin_private_key','')
+        gitserver = config.get('gitserver','')
+        gitadmin_dir = config.get('gitadmin_dir','')
+        gitadmin_repo = config.get('gitadmin_repo','')
+        git_ssh_key_dir = config.get('git_ssh_key_dir','')
+        # 1.cd gitadmin_dir
+        os.chdir(gitadmin_dir)
+        # 2.gen sshwrap.sh:
+        fobj = open( 'sshwrap.sh','w' )
+        fobj.write( '#!/bin/bash%s' % os.linesep )
+        fobj.write( 'gitadmin_key=%s%s' % ( gitadmin_private_key, os.linesep ) )
+        fobj.write( 'ssh -i $gitadmin_key $@%s' % os.linesep )
+        fobj.close()
+        os.chmod('sshwrap.sh',0700)
+        sshpath=os.path.abspath('sshwrap.sh')
+        # #!/bin/bash
+        # gitadmin_key=gitadmin_private_key
+        # ssh -i $gitadmin_key $@
+        # EOF
+        # 3.GIT_SSH=sshwrap.sh git clone git@gitserver:gitadmin_repo
+        shutil.rmtree(gitadmin_repo,True)
+        cmd = ( 'GIT_SSH=%s git clone git@%s:%s'%(sshpath,gitserver, gitadmin_repo), )
+        subprocess.call( cmd, shell=True )
+        # 4.compare gitadmin_repo/git_ssh_key_dir/username[@title].pub with ssh_key
+        #   if not eq  cover gitadmin_repo/git_ssh_key_dir/username@title.pub with ssh_key
+        keytitle = '@%s'%title if title else ''
+        keyfile = os.path.abspath('%s/%s/%s%s.pub' % ( gitadmin_repo, git_ssh_key_dir, username, keytitle ))
+        
+        keyobj = open( keyfile, 'w' )
+        keyobj.write( ssh_key )
+        keyobj.close()
+        os.chdir(gitadmin_repo)
+
+        # 5. git add , commit, push
+        cmd = ('git', 'add', '%s/%s%s.pub' % ( git_ssh_key_dir, username, keytitle ))
+        subprocess.call( cmd  )
+
+        cmd = ('git', 'commit', '-m','\"update %s/%s%s.pub\"' % ( git_ssh_key_dir, username, keytitle ))
+        subprocess.call( cmd )
+        cmd = ('GIT_SSH=%s git push '%sshpath, )
+        subprocess.call( cmd, shell=True )
+        os.chdir(gitadmin_dir)
+        #shutil.rmtree(gitadmin_repo)
+
+    def updategitsshkey(self, username, oldtitle, title, ssh_key ):
+        import shutil 
+        # TODO: Is this right?  
+        if not ssh_key or not title :
+            return
+        gitadmin_private_key = config.get('gitadmin_private_key','')
+        gitserver = config.get('gitserver','')
+        gitadmin_dir = config.get('gitadmin_dir','')
+        gitadmin_repo = config.get('gitadmin_repo','')
+        git_ssh_key_dir = config.get('git_ssh_key_dir','')
+        # 1.cd gitadmin_dir
+        os.chdir(gitadmin_dir)
+        # 2.gen sshwrap.sh:
+        fobj = open( 'sshwrap.sh','w' )
+        fobj.write( '#!/bin/bash%s' % os.linesep )
+        fobj.write( 'gitadmin_key=%s%s' % ( gitadmin_private_key, os.linesep ) )
+        fobj.write( 'ssh -i $gitadmin_key $@%s' % os.linesep )
+        fobj.close()
+        os.chmod('sshwrap.sh',0700)
+        sshpath=os.path.abspath('sshwrap.sh')
+        # #!/bin/bash
+        # gitadmin_key=gitadmin_private_key
+        # ssh -i $gitadmin_key $@
+        # EOF
+        # 3.GIT_SSH=sshwrap.sh git clone git@gitserver:gitadmin_repo
+        shutil.rmtree(gitadmin_repo,True)
+        cmd = ( 'GIT_SSH=%s git clone git@%s:%s'%(sshpath,gitserver, gitadmin_repo), )
+        subprocess.call( cmd, shell=True )
+        # 4.compare gitadmin_repo/git_ssh_key_dir/username[@title].pub with ssh_key
+        #   if not eq  cover gitadmin_repo/git_ssh_key_dir/username@title.pub with ssh_key
+        keytitle = '@%s'%title if title else ''
+        oldkeytitle = '@%s'%oldtitle if oldtitle else ''
+        keyfile = os.path.abspath('%s/%s/%s%s.pub' % ( gitadmin_repo, git_ssh_key_dir, username, keytitle ))
+        
+        keyobj = open( keyfile, 'w' )
+        keyobj.write( ssh_key )
+        keyobj.close()
+        os.chdir(gitadmin_repo)
+
+        # 5. git add new rm old, commit, push
+        cmd = ('git', 'add', '%s/%s%s.pub' % ( git_ssh_key_dir, username, keytitle ))
+        subprocess.call( cmd  )
+        cmd = ('git', 'rm', '%s/%s%s.pub' % ( git_ssh_key_dir, username, oldkeytitle ))
+        subprocess.call( cmd  )
+
+        cmd = ('git', 'commit', '-m','\"update %s/%s%s.pub\"' % ( git_ssh_key_dir, username, keytitle ))
+        subprocess.call( cmd )
+        cmd = ('GIT_SSH=%s git push '%sshpath, )
+        subprocess.call( cmd, shell=True )
+        os.chdir(gitadmin_dir)
+        #shutil.rmtree(gitadmin_repo)
+
+    def delgitsshkey( self, username, title ):
+        import shutil 
+        gitadmin_private_key = config.get('gitadmin_private_key','')
+        gitserver = config.get('gitserver','')
+        gitadmin_dir = config.get('gitadmin_dir','')
+        gitadmin_repo = config.get('gitadmin_repo','')
+        git_ssh_key_dir = config.get('git_ssh_key_dir','')
+        # 1.cd gitadmin_dir
+        os.chdir(gitadmin_dir)
+        # 2.gen sshwrap.sh:
+        fobj = open( 'sshwrap.sh','w' )
+        fobj.write( '#!/bin/bash%s' % os.linesep )
+        fobj.write( 'gitadmin_key=%s%s' % ( gitadmin_private_key, os.linesep ) )
+        fobj.write( 'ssh -i $gitadmin_key $@%s' % os.linesep )
+        fobj.close()
+        os.chmod('sshwrap.sh',0700)
+        sshpath=os.path.abspath('sshwrap.sh')
+        # #!/bin/bash
+        # gitadmin_key=gitadmin_private_key
+        # ssh -i $gitadmin_key $@
+        # EOF
+        # 3.GIT_SSH=sshwrap.sh git clone git@gitserver:gitadmin_repo
+        shutil.rmtree(gitadmin_repo,True)
+        cmd = ( 'GIT_SSH=%s git clone git@%s:%s'%(sshpath,gitserver, gitadmin_repo), )
+        subprocess.call( cmd, shell=True )
+        # 4.compare gitadmin_repo/git_ssh_key_dir/username[@title].pub with ssh_key
+        #   if not eq  cover gitadmin_repo/git_ssh_key_dir/username@title.pub with ssh_key
+        keytitle = '@%s'%title if title else ''
+        keyfile = os.path.abspath('%s/%s/%s%s.pub' % ( gitadmin_repo, git_ssh_key_dir, username, keytitle ))
+        
+        os.chdir(gitadmin_repo)
+
+        # 5. git rm , commit, push
+        cmd = ('git', 'rm', '%s/%s%s.pub' % ( git_ssh_key_dir, username, keytitle ))
+        subprocess.call( cmd  )
+
+        cmd = ('git', 'commit', '-m','\"update %s/%s%s.pub\"' % ( git_ssh_key_dir, username, keytitle ))
+        subprocess.call( cmd )
+        cmd = ('GIT_SSH=%s git push '%sshpath, )
+        subprocess.call( cmd, shell=True )
+        os.chdir(gitadmin_dir)
+        #shutil.rmtree(gitadmin_repo)
+
+
+    @identity.require(identity.not_anonymous())
+    @validate(validators={
+        'sshkeyid' : validators.Number,
+        'title' : validators.All(
+            validators.String(not_empty=True, max=42),
+            validators.Regex(regex='^[^\n:<>]+$'),
+            ),
+        'ssh_key' : ValidSSHKey(max=5000)
+    })
+    @error_handler(error) # pylint: disable-msg=E0602
+    @expose(template="fas.templates.user.view", allow_json=True)
+    def editsshkey(self, sshkeyid, title, ssh_key):
+        ''' Saves user sshkey to database'''
+        sshkey = PeopleSSHKey.by_id( sshkeyid )
+        people = People.by_id( sshkey.person_id )
+        oldtitle = None
+        if sshkey.title != title:
+            oldtitle = sshkey.title
+
+        if sshkey.ssh_key == ssh_key and sshkey.title == title:
+            #not modified
+            turbogears.redirect("/user/view/%s" % people.username)
+            return dict()
+#        if not PeopleSSHKey.by_person_title( sshkey.person_id, title ):
+            # title is used already
+#            turbogears.flash(_('title:%s is already used.' % title))
+#            turbogears.redirect("/user/view/%s" % people.username)
+#            return dict()
+#        if not PeopleSSHKey.by_person_sshkey( sshkey.person_id, ssh_key ):
+            # sshkey is used already
+#            turbogears.flash(_('sshkey is already used.'))
+#            turbogears.redirect("/user/view/%s" % people.username)
+#            return dict()
+        sshkey.title = title
+        sshkey.ssh_key = ssh_key
+        session.flush()
+        self.updategitsshkey( people.username, oldtitle, sshkey.title, sshkey.ssh_key )
+        turbogears.flash(_('Your SSH Key have been saved.'))
+        turbogears.redirect("/user/view/%s" % people.username)
+        return dict()
+
+    @identity.require(identity.not_anonymous())
+    @validate(validators={
+        'targetname' : KnownUser,
+        'title' : validators.All(
+            validators.String(not_empty=True, max=42),
+            validators.Regex(regex='^[^\n:<>]+$'),
+            ),
+        'ssh_key' : ValidSSHKey(max=5000)
+    })
+    @error_handler(error) # pylint: disable-msg=E0602
+    @expose(template="fas.templates.user.view", allow_json=True)
+    def addsshkey(self, targetname, title, ssh_key):
+        ''' Saves user sshkey to database'''
+        people = People.by_username( targetname )
+
+        sshkey = PeopleSSHKey()
+        sshkey.person_id = people.id
+        sshkey.title = title
+        sshkey.ssh_key = ssh_key
+        session.flush()
+
+        self.addgitsshkey( people.username, sshkey.title, sshkey.ssh_key )
+
+        turbogears.flash(_('Your SSH Key have been add.'))
+        turbogears.redirect("/user/view/%s" % people.username)
+        return dict()
+
+
+    @identity.require(identity.not_anonymous())
+    @validate(validators={
+        'sshkeyid' : validators.Number
+    })
+    @error_handler(error) # pylint: disable-msg=E0602
+    @expose(template="fas.templates.user.view", allow_json=True)
+    def delsshkey(self, sshkeyid):
+        ''' Saves user sshkey to database'''
+        sshkey = PeopleSSHKey.by_id( sshkeyid )
+        people = People.by_id( sshkey.person_id )
+        session.delete(sshkey)
+        self.delgitsshkey( people.username, sshkey.title )
+        turbogears.flash(_('Your SSH Key have been delete.'))
+        turbogears.redirect("/user/view/%s" % people.username)
         return dict()

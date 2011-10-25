@@ -38,7 +38,7 @@ from fas.configs import Config
 from fas.fpca import FPCA
 from fas.json_request import JsonRequest
 from fas.help import Help
-from fas.model import Session, People
+from fas.model import Session, People, PeopleSSHKey
 from fas.model import SessionTable
 
 from fas.openid_samadhi import OpenID
@@ -171,10 +171,11 @@ class Root(plugin.RootController):
     def home(self):
         user_name = turbogears.identity.current.user_name
         person = People.by_username(user_name)
+        sshkeys = PeopleSSHKey.by_personid( person.id )
         (cla_done, undeprecated_cla) = undeprecated_cla_done(person)
 
         person = person.filter_private()
-        return dict(person=person, memberships=person['memberships'], cla=undeprecated_cla)
+        return dict(person=person, sshkeys=sshkeys, memberships=person['memberships'], cla=undeprecated_cla)
 
     @expose(template="fas.templates.about")
     def about(self):

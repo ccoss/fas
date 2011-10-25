@@ -55,6 +55,7 @@ get_engine()
 #
 
 PeopleTable = Table('people', metadata, autoload=True)
+PeopleSSHKeyTable = Table('people_sshkey', metadata, autoload=True)
 PersonRolesTable = Table('person_roles', metadata, autoload=True)
 
 ConfigsTable = Table('configs', metadata, autoload=True)
@@ -108,7 +109,7 @@ class People(SABase):
     # Map the people fields that various classes of users are allowed to retrieve
     allow_fields = {
         # This is the complete list of fields
-        'complete': ('id', 'username', 'human_name', 'gpg_keyid', 'ssh_key',
+        'complete': ('id', 'username', 'human_name', 'gpg_keyid',
             'password', 'passwordtoken', 'password_changed', 'email',
             'emailtoken', 'unverified_email', 'comments', 'postal_address',
             'telephone', 'facsimile', 'affiliation', 'certificate_serial',
@@ -116,7 +117,7 @@ class People(SABase):
             'status_change', 'locale', 'timezone', 'latitude', 'longitude',
             'country_code', 'privacy', 'old_password', 'alias_enabled'),
         # Full disclosure to admins
-        'admin': ('id', 'username', 'human_name', 'gpg_keyid', 'ssh_key',
+        'admin': ('id', 'username', 'human_name', 'gpg_keyid',
             'password', 'passwordtoken', 'password_changed', 'email',
             'emailtoken', 'unverified_email', 'comments', 'postal_address',
             'telephone', 'facsimile', 'affiliation', 'certificate_serial',
@@ -125,7 +126,7 @@ class People(SABase):
             'country_code', 'privacy', 'old_password', 'alias_enabled'),
         # Full disclosure to systems group
         'systems': ('id', 'username', 'human_name',
-            'gpg_keyid', 'ssh_key', 'password', 'passwordtoken',
+            'gpg_keyid', 'password', 'passwordtoken',
             'password_changed', 'email', 'emailtoken', 'unverified_email',
             'comments', 'postal_address', 'telephone', 'facsimile',
             'affiliation', 'certificate_serial', 'creation',
@@ -134,8 +135,8 @@ class People(SABase):
             'longitude', 'country_code', 'privacy', 'old_password',
             'alias_enabled'),
         # thirdparty gets the results of privacy and ssh_key in addition
-        'thirdparty': ('ssh_key',),
-        'self': ('id', 'username', 'human_name', 'gpg_keyid', 'ssh_key',
+        #'thirdparty': ('ssh_key',),
+        'self': ('id', 'username', 'human_name', 'gpg_keyid',
             'password', 'password_changed', 'email', 'unverified_email',
             'comments', 'postal_address', 'telephone', 'facsimile',
             'affiliation', 'certificate_serial', 'creation', 'ircnick',
@@ -385,6 +386,24 @@ class People(SABase):
     approved_memberships = association_proxy('approved_roles', 'group')
     unapproved_memberships = association_proxy('unapproved_roles', 'group')
 
+class PeopleSSHKey(SABase):
+    '''People SSHKey'''
+    @classmethod
+    def by_id( cls, id=id ):
+        return cls.query.filter_by( id=id ).one()
+
+    @classmethod
+    def by_person_title( cls, person_id=id, title='default' ):
+        return cls.query.filter_by( person_id=person_id, title=title )
+
+    @classmethod
+    def by_person_sshkey( cls, person_id=id, sshkey='' ):
+        return cls.query.filter_by( person_id=person_id, ssh_key=sshkey )
+
+    @classmethod
+    def by_personid( cls, person_id=id ):
+        return cls.query.filter_by( person_id=person_id ).all()
+
 class PersonRoles(SABase):
     '''Record people that are members of groups.'''
     def __repr__(cls):
@@ -561,6 +580,8 @@ mapper(People, PeopleTable, properties = {
     'roles': relation(PersonRoles, backref='member',
         primaryjoin = PersonRolesTable.c.person_id==PeopleTable.c.id)
     })
+
+mapper(PeopleSSHKey, PeopleSSHKeyTable)
 
 mapper(PersonRoles, PersonRolesTable, properties = {
     'group': relation(Groups, backref='roles', lazy = False,

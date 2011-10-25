@@ -872,3 +872,22 @@ HelpBalloonElements.prototype = {
 	 */
 	balloons: []
 };
+
+/** click action display div,hide action
+ *  click again hide div,display action
+ */
+function showhidediv(action,div){
+   try{
+     var sbtitle=document.getElementById(div);
+     var widget=document.getElementById(action);
+     if(sbtitle){
+       if(sbtitle.style.display=='block'){
+         sbtitle.style.display='none';
+         widget.style.display='block';
+       }else{
+         sbtitle.style.display='block';
+         widget.style.display='none';
+       }
+     }
+   }catch(e){}
+}
