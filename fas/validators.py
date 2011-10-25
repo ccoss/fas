@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2008  Ricky Zhou All rights reserved.
-# Copyright © 2008 Red Hat, Inc. All rights reserved.
+# Copyright © 2008  Ricky Zhou
+# Copyright © 2008 Red Hat, Inc.
 #
 # This copyrighted material is made available to anyone wishing to use, modify,
 # copy, or redistribute it subject to the terms and conditions of the GNU
@@ -227,3 +227,101 @@ class ValidLanguage(validators.FancyValidator):
         if value not in available_languages():
             raise validators.Invalid(self.message('not_available', state, lang=value),
                     value, state)
+
+class PasswordStrength(validators.UnicodeString):
+    '''Make sure that a password meets our strength requirements'''
+
+    messages = {'strength': _('Passwords must meet certain strength requirements.  If they have a mix of symbols, upper and lowercase letters, and digits they must be at least 9 characters.  If they have a mix of upper and lowercase letters and digits they must be at least 10 characters.  If they have lowercase letters and digits, they must be at least 12 characters.  Letters alone means they need 20 or more characters.'),
+            'xkcd': _('Malicious hackers read xkcd, you know')}
+
+    def validate_python(self, value, state):
+        # http://xkcd.com/936/
+        if value.lower() in (u'correct horse battery staple',
+                u'correcthorsebatterystaple', u'tr0ub4dor&3'):
+            raise validators.Invalid(self.message('xkcd', state), value, state)
+
+        length = len(value)
+        if length >= 20:
+            return
+        if length < 9:
+            raise validators.Invalid(self.message('strength', state),
+                    value, state)
+
+        lower = upper = digit = space = symbol = False
+
+        for c in value:
+            if c.isalpha():
+                if c.islower():
+                    lower = True
+                else:
+                    upper = True
+            elif c.isdigit():
+                digit = True
+            elif c.isspace():
+                space = True
+            else:
+                symbol = True
+
+        if upper and lower and digit and symbol:
+            if length >= 9:
+                return
+        elif upper and lower and (digit or symbol):
+            if length >= 10:
+                return
+        elif (lower or upper) and (digit or symbol):
+            if length >= 12:
+                return
+        raise validators.Invalid(self.message('strength', state), value, state)
+
+
+class ValidHumanWithOverride(validators.FormValidator):
+    '''Perform some simple heuristics on the person's human name.
+
+    We need a legally valid name.  We need to try to screen out names that are
+    possibly bad here.  This should be used with an override switch that lets
+    a user tell us that his legal name really matches the heuristics we
+    establish.
+
+    Present heuristics are that the name must be multiple words and that the
+    last name cannot be a single letter or a letter followed by a period.
+
+    This validator is meant to be used as a chained validator with a text
+    input field for the human name and a boolean checkbox field for the
+    override.  Here's a n example of using it from within
+    a :class:`formencode.Schema`::
+
+        class TestSchema(Schema):
+            human_name = validators.UnicodeString(not_empty=True)
+            name_override = validators.StringBool(if_missing=False)
+            chained_validators = [ValidHumanWithOverride('human_name', 'name_override')]
+    '''
+
+    messages = {'noname': _('You must enter your legal name'),
+            'lastfirst': _('You must include both your last name and first name.  If your name really only consists of a single letter, you may check the override checkbox to submit this name.'),
+            'initial': _('You must include the full form of your names, not just initials.  If your fullname really has one letter portions, you may check the override checkbox to submit this name.')}
+
+    def __init__(self, name_field, override_field):
+        super(validators.FormValidator, self).__init__()
+        self.name_field = name_field
+        self.override = override_field
+
+    def validate_python(self, values, state):
+        # Check that a name was entered
+        name = values.get(self.name_field)
+        if not name:
+            raise validators.Invalid(self.message('noname', state), values, state)
+
+        # If override is set, then we skip the rest of testing
+        if values.get(self.override, False):
+            return
+
+        # Check that the name is more than one word
+        split_name = name.split(u' ')
+        if len(split_name) < 2:
+            raise validators.Invalid(self.message('lastfirst', state), values, state)
+
+        # Check for initials
+        for name_part in split_name:
+            if len(name_part.rstrip(u'.')) <= 1:
+                raise validators.Invalid(self.message('initial', state), values, state)
+
