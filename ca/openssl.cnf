@@ -103,12 +103,12 @@ string_mask = nombstr
 # req_extensions = v3_req
 
 [ root_ca_distinguished_name ]
-commonName = Test CA
-countryName = US
-stateOrProvinceName = North Carolina
+commonName = koji
+countryName = CN
+stateOrProvinceName = BeiJing
 localityName = Raleigh
-0.organizationName = Fedora Project
-emailAddress = ricky@fedoraproject.org
+0.organizationName = Koji Project
+emailAddress = chensuchun@300.cn
 
 [ usr_cert ]
 
